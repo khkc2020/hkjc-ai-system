@@ -9,7 +9,7 @@ import time
 from .database import get_db, engine, Base
 from .models import Race, RaceRunner
 from .schemas import RaceSummary, RaceDetail
-from scraper.hkjc_scraper import parse_race_results, save_to_db
+from scraper.hkjc_scraper import fetch_any_race, save_to_db
 
 Base.metadata.create_all(bind=engine)
 
@@ -59,16 +59,16 @@ HTML_CONTENT = """<!DOCTYPE html>
           @click="scrapeOnlineData" 
           :disabled="scraping"
           class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-sm font-bold shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
-          title="從馬會網站自動抓取當日賽事資料"
+          title="從馬會網站自動抓取當日全日排位表 (最多11場)"
         >
-          <span>{{ scraping ? '⏳ 抓取中...' : '📥 抓取此日賽事' }}</span>
+          <span>{{ scraping ? '⏳ 抓取全日排位中...' : '📥 抓取此日賽事' }}</span>
         </button>
 
         <button 
           @click="seedDemoData" 
           :disabled="seeding"
           class="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-lg text-sm font-bold shadow-sm transition disabled:opacity-50"
-          title="直接填入一場真實賽事的示範數據快速測試"
+          title="填入沙田全日多場獨立馬匹示範數據"
         >
           <span>{{ seeding ? '載入中...' : '🎲 載入示範數據' }}</span>
         </button>
@@ -94,9 +94,9 @@ HTML_CONTENT = """<!DOCTYPE html>
         第 {{ r.race_no }} 場
       </button>
       <div v-if="races.length === 0 && !loading" class="text-sm text-slate-500 bg-white p-4 rounded-xl border border-slate-200 shadow-sm w-full mt-2">
-        <p class="font-bold text-slate-700 mb-1">💡 該日期資料庫中暫無賽事數據</p>
+        <p class="font-bold text-slate-700 mb-1">💡 該日期暫無賽事資料</p>
         <p class="text-xs text-slate-500">
-          您可以點擊右上角的 <strong class="text-amber-700">「🎲 載入示範數據」</strong> 立即體驗預測功能；或點擊 <strong class="text-blue-700">「📥 抓取此日賽事」</strong> 線上向馬會獲取數據。
+          您可以點擊右上角的 <strong class="text-amber-700">「🎲 載入示範數據」</strong> 查看包含多場不同馬匹的預測；或點擊 <strong class="text-blue-700">「📥 抓取此日賽事」</strong> 線上獲取馬會最新排位表。
         </p>
       </div>
     </div>
@@ -125,7 +125,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           class="bg-emerald-500 hover:bg-emerald-600 text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-sm transition disabled:opacity-50 flex items-center gap-1.5"
         >
           <span>⚡</span>
-          <span>{{ predicting ? 'AI 深度計算中...' : '運算 AI 預測勝率' }}</span>
+          <span>{{ predicting ? 'AI 深度計算中...' : '運算本場 AI 預測' }}</span>
         </button>
       </div>
 
@@ -229,7 +229,9 @@ HTML_CONTENT = """<!DOCTYPE html>
               const data = await res.json();
               races.value = data;
               if (data.length > 0) {
-                selectRace(data[0].race_id);
+                // 如果先前選中的場次存在，則保持；否則選第一場
+                const found = data.find(r => r.race_id === selectedRaceId.value);
+                selectRace(found ? found.race_id : data[0].race_id);
               } else {
                 currentRace.value = null;
                 selectedRaceId.value = '';
@@ -260,7 +262,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           try {
             await fetch(`/api/mock_predict/${selectedRaceId.value}`, { method: 'POST' });
             await selectRace(selectedRaceId.value);
-            statusNotice.value = 'AI 預測運算完成！已為您標註「價值馬 (+EV)」與「最高勝率」馬匹。';
+            statusNotice.value = '第 ' + (currentRace.value?.race_no || '') + ' 場 AI 預測完成！已標記高勝率與價值馬。';
           } catch (e) {
             alert('預測執行出錯: ' + e);
           } finally {
@@ -270,14 +272,14 @@ HTML_CONTENT = """<!DOCTYPE html>
 
         const scrapeOnlineData = async () => {
           scraping.value = true;
-          statusNotice.value = '正在連線香港賽馬會網站抓取賽事數據，請稍候約 10 秒...';
+          statusNotice.value = '正在連線香港賽馬會抓取全日排位表 (第1場至第11場)，請稍候約 15 秒...';
           try {
             const res = await fetch(`/api/scrape?race_date=${selectedDate.value}`, { method: 'POST' });
             const data = await res.json();
             statusNotice.value = data.message || '抓取完成！';
             await fetchRaces();
           } catch (e) {
-            statusNotice.value = '抓取失敗，請確認該日期是否有馬會賽事。';
+            statusNotice.value = '連線超時或出錯，請確認該日期是否有馬會賽事。';
           } finally {
             scraping.value = false;
           }
@@ -289,7 +291,7 @@ HTML_CONTENT = """<!DOCTYPE html>
             const res = await fetch('/api/seed_demo', { method: 'POST' });
             const data = await res.json();
             selectedDate.value = data.date || '2024-06-23';
-            statusNotice.value = '已成功載入示範賽事數據！請點擊下方的「⚡ 運算 AI 預測勝率」查看效果。';
+            statusNotice.value = '已成功載入沙田多場獨立示範賽事 (第1場至第3場)！各場馬匹完全獨立。';
             await fetchRaces();
           } catch (e) {
             alert('載入示範數據失敗: ' + e);
@@ -357,22 +359,19 @@ def generate_mock_predictions(race_id: str, db: Session = Depends(get_db)):
     if not runners:
         raise HTTPException(status_code=404, detail="該場次無馬匹名單")
 
-    # 模擬計算勝率
     num_runners = len(runners)
     base_prob = 1.0 / num_runners
 
     for runner in runners:
-        # 考慮評分與檔位偏差
+        # 考慮評分加成與檔位影響
         rating_boost = ((runner.rating or 60) - 50) / 100.0
         draw_boost = (7 - abs((runner.draw or 7) - 4)) / 30.0
         simulated_prob = round(max(0.02, base_prob + (rating_boost * 0.05) + (draw_boost * 0.03)), 4)
         runner.predicted_win_prob = simulated_prob
         
-        # 計算期望值 EV = (勝率 * 賠率) - 1
         if runner.live_odds and runner.live_odds > 0:
             ev = round((simulated_prob * runner.live_odds) - 1.0, 3)
             runner.expected_value = ev
-            # EV 大於 0.15 (15% 正利潤空間) 即標籤為「價值馬」
             runner.is_value_bet = 1 if ev > 0.15 else 0
         else:
             runner.expected_value = 0.0
@@ -386,63 +385,104 @@ def trigger_scrape(
     race_date: str = Query(..., description="日期 (YYYY-MM-DD)"),
     db: Session = Depends(get_db)
 ):
-    """線上從馬會網站自動抓取該日賽事"""
+    """線上從馬會網站自動抓取該日賽事排位 (全日最多 11 場)"""
     hkjc_date_str = race_date.replace("-", "/")
-    found_any = False
+    saved_count = 0
     
-    # 抓取該日的前 5 場
-    for race_no in range(1, 6):
-        race_info, runners = parse_race_results(hkjc_date_str, race_no)
+    # 遍歷全日 1 至 11 場
+    for race_no in range(1, 12):
+        race_info, runners = fetch_any_race(hkjc_date_str, race_no)
         if race_info and runners:
             save_to_db(race_info, runners)
-            found_any = True
-        time.sleep(0.5)
+            saved_count += 1
+        time.sleep(0.4)
 
-    if found_any:
-        return {"status": "success", "message": f"成功抓取 {race_date} 的賽事數據！"}
+    if saved_count > 0:
+        return {"status": "success", "message": f"成功從香港賽馬會獲取 {race_date} 共 {saved_count} 場賽事完整排位名單！"}
     else:
-        return {"status": "empty", "message": f"馬會網站未找到 {race_date} 的賽事，請確認是否為賽馬日。"}
+        return {"status": "empty", "message": f"馬會網站目前未找到 {race_date} 的賽事或排位，請確認日期是否正確。"}
 
 @app.post("/api/seed_demo")
 def seed_demo_data(db: Session = Depends(get_db)):
-    """直接填入示範賽事數據供快速體驗"""
+    """直接填入 3 場完全獨立、包含不同真實名駒的示範數據"""
     demo_date = date(2024, 6, 23)
-    race_id = "20240623_ST_01"
 
-    existing_race = db.query(Race).filter(Race.race_id == race_id).first()
-    if not existing_race:
-        demo_race = Race(
-            race_id=race_id,
+    # 先清理舊示範數據
+    old_races = db.query(Race).filter(Race.race_date == demo_date).all()
+    for r in old_races:
+        db.query(RaceRunner).filter(RaceRunner.race_id == r.race_id).delete()
+        db.delete(r)
+    db.commit()
+
+    demo_races_config = [
+        {
+            "race_id": "20240623_ST_01",
+            "race_no": 1,
+            "race_class": "第四班 (60-40分)",
+            "distance": 1200,
+            "horses": [
+                (1, "E101", "金鑽貴人", 4, 133, "潘頓", "文家良", 78, 2.6),
+                (2, "G234", "加州星球", 1, 131, "布文", "告東尼", 76, 5.8),
+                (3, "H345", "浪漫勇士", 6, 128, "麥道朗", "沈集成", 73, 4.2),
+                (4, "J123", "福逸", 9, 126, "巴度", "高伯新", 71, 14.0),
+                (5, "K456", "遨遊氣泡", 2, 124, "田泰安", "姚本輝", 69, 8.5),
+                (6, "L789", "永遠美麗", 7, 122, "何澤堯", "蔡約翰", 67, 11.0),
+                (7, "M012", "維港智能", 11, 120, "梁家俊", "沈集成", 65, 22.0),
+                (8, "N345", "幸運有您", 3, 118, "艾兆禮", "羅富全", 63, 18.0),
+            ]
+        },
+        {
+            "race_id": "20240623_ST_02",
+            "race_no": 2,
+            "race_class": "第三班 (80-60分)",
+            "distance": 1400,
+            "horses": [
+                (1, "B111", "快步奔騰", 2, 135, "田泰安", "呂健威", 79, 3.5),
+                (2, "C222", "包裝旋風", 5, 132, "何澤堯", "方嘉柏", 77, 4.8),
+                (3, "D333", "美麗奔馳", 8, 129, "潘頓", "告東尼", 75, 2.9),
+                (4, "E444", "連連歡呼", 1, 126, "鍾易禮", "伍鵬志", 73, 16.0),
+                (5, "F555", "紅運帝王", 4, 123, "布文", "蔡約翰", 71, 6.2),
+                (6, "G666", "電氣騎士", 9, 120, "巴度", "韋達", 69, 25.0),
+                (7, "H777", "超超比", 3, 118, "周俊樂", "沈集成", 68, 9.5),
+                (8, "J888", "天天得樂", 7, 116, "艾兆禮", "葉楚航", 66, 33.0),
+            ]
+        },
+        {
+            "race_id": "20240623_ST_03",
+            "race_no": 3,
+            "race_class": "第二班 (100-80分)",
+            "distance": 1600,
+            "horses": [
+                (1, "K001", "安騁", 3, 133, "莫雷拉", "蔡約翰", 98, 2.1),
+                (2, "K002", "知足常樂", 7, 130, "潘頓", "羅富全", 95, 4.0),
+                (3, "K003", "保羅承傳", 1, 127, "布文", "告東尼", 93, 7.5),
+                (4, "K004", "新力高升", 4, 124, "何澤堯", "蘇偉賢", 91, 5.5),
+                (5, "K005", "喜蓮勇感", 6, 121, "田泰安", "沈集成", 88, 12.0),
+                (6, "K006", "越駿歡欣", 2, 118, "巴度", "羅富全", 86, 18.0),
+                (7, "K007", "敏捷神駒", 8, 115, "鍾易禮", "黎昭昇", 84, 28.0),
+                (8, "K008", "增有", 5, 115, "梁家俊", "賀賢", 82, 35.0),
+            ]
+        }
+    ]
+
+    for cfg in demo_races_config:
+        race = Race(
+            race_id=cfg["race_id"],
             race_date=demo_date,
             venue="ST",
-            race_no=1,
-            race_class="第四班 (60-40分)",
-            distance=1200,
+            race_no=cfg["race_no"],
+            race_class=cfg["race_class"],
+            distance=cfg["distance"],
             track_type="草地",
             course_type="A",
             going="好地"
         )
-        db.add(demo_race)
+        db.add(race)
         db.commit()
 
-        sample_horses = [
-            (1, "E101", "金鑽貴人", 4, 133, "潘頓", "文家良", 78, 2.6),
-            (2, "G234", "加州星球", 1, 131, "布文", "告東尼", 76, 5.8),
-            (3, "H345", "浪漫勇士", 6, 128, "麥道朗", "沈集成", 73, 4.2),
-            (4, "J123", "福逸", 9, 126, "巴度", "高伯新", 71, 14.0),
-            (5, "K456", "遨遊氣泡", 2, 124, "田泰安", "姚本輝", 69, 8.5),
-            (6, "L789", "永遠美麗", 7, 122, "何澤堯", "蔡約翰", 67, 11.0),
-            (7, "M012", "維港智能", 11, 120, "梁家俊", "沈集成", 65, 22.0),
-            (8, "N345", "幸運有您", 3, 118, "艾兆禮", "羅富全", 63, 18.0),
-            (9, "P678", "威力奔騰", 8, 116, "班德禮", "賀賢", 61, 35.0),
-            (10, "Q901", "安騁", 5, 115, "莫雷拉", "蔡約翰", 60, 9.2),
-            (11, "R234", "自勝者強", 10, 115, "鍾易禮", "告東尼", 59, 45.0),
-            (12, "S567", "美麗第一", 12, 115, "楊明綸", "伍鵬志", 58, 28.0)
-        ]
-
-        for h_no, code, name, draw, wt, jock, trn, rat, odds in sample_horses:
+        for h_no, code, name, draw, wt, jock, trn, rat, odds in cfg["horses"]:
             runner = RaceRunner(
-                race_id=race_id,
+                race_id=cfg["race_id"],
                 horse_no=h_no,
                 horse_code=code,
                 horse_name=name,
