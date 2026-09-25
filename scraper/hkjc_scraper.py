@@ -51,7 +51,10 @@ def parse_racecard(race_date_str: str, race_no: int):
     dist_match = re.search(r'(\d{3,4})米', race_info_text)
     distance = int(dist_match.group(1)) if dist_match else 1200
     
-    class_match = re.search(r'(第[一二三四五]班|新馬賽|國際一級賽|一級賽|二級賽|三級賽)', race_info_text)
+    # 優先匹配第1-5班，杜絕頂部導航欄「二級賽」干擾
+    class_match = re.search(r'(第[一二三四五]班)', race_info_text)
+    if not class_match:
+        class_match = re.search(r'(國際[一二三]級賽|香港[一二三]級賽|[一二三]級賽|新馬賽)', race_info_text)
     race_class = class_match.group(1) if class_match else f"第 {race_no} 場賽事"
 
     date_obj = datetime.strptime(race_date_str, "%Y/%m/%d").date()
@@ -168,7 +171,9 @@ def parse_race_results(race_date_str: str, race_no: int):
     dist_match = re.search(r'(\d{3,4})米', info_text)
     distance = int(dist_match.group(1)) if dist_match else 1200
     
-    class_match = re.search(r'(第[一二三四五]班|新馬賽|國際一級賽|一級賽|二級賽|三級賽)', info_text)
+    class_match = re.search(r'(第[一二三四五]班)', info_text)
+    if not class_match:
+        class_match = re.search(r'(國際[一二三]級賽|香港[一二三]級賽|[一二三]級賽|新馬賽)', info_text)
     race_class = class_match.group(1) if class_match else f"第 {race_no} 場"
 
     date_obj = datetime.strptime(race_date_str, "%Y/%m/%d").date()
