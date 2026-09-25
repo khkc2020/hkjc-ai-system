@@ -213,16 +213,20 @@ HTML_CONTENT = """<!DOCTYPE html>
       setup() {
         // 自動偵測並鎖定下一個賽馬日 (星期三或星期日)
 const getNextRaceDate = () => {
-  const now = new Date();
-  const day = now.getDay(); // 0 是星期日, 3 是星期三
-  let diff = 0;
-  if (day === 0) diff = 0;
-  else if (day <= 3) diff = 3 - day;
-  else diff = 7 - day;
-  now.setDate(now.getDate() + diff);
-  return now.toISOString().split('T')[0];
-};
-const selectedDate = ref(getNextRaceDate());
+          const now = new Date();
+          const day = now.getDay(); // 0 是星期日, 3 是星期三
+          let diff = 0;
+          if (day === 0) diff = 0;
+          else if (day <= 3) diff = 3 - day;
+          else diff = 7 - day;
+          now.setDate(now.getDate() + diff);
+
+          const y = now.getFullYear();
+          const m = String(now.getMonth() + 1).padStart(2, '0');
+          const d = String(now.getDate()).padStart(2, '0');
+          return `${y}-${m}-${d}`;
+        };
+        const selectedDate = ref(getNextRaceDate());
         const races = ref([]);
         const currentRace = ref(null);
         const selectedRaceId = ref('');
