@@ -224,7 +224,7 @@ HTML_CONTENT = """<!DOCTYPE html>
           const y = now.getFullYear();
           const m = String(now.getMonth() + 1).padStart(2, '0');
           const d = String(now.getDate()).padStart(2, '0');
-          return ;
+          return y + "-" + m + "-" + d;
         };
         const selectedDate = ref(getNextRaceDate());
         const races = ref([]);
