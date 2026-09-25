@@ -211,8 +211,8 @@ HTML_CONTENT = """<!DOCTYPE html>
     const { createApp, ref, onMounted } = Vue;
     createApp({
       setup() {
-        // 自動偵測並鎖定下一個賽馬日 (星期三或星期日)
-const getNextRaceDate = () => {
+        // 自動取得香港本地時間下一個賽馬日 (星期三或日)，避開 UTC 時區差
+        const getNextRaceDate = () => {
           const now = new Date();
           const day = now.getDay(); // 0 是星期日, 3 是星期三
           let diff = 0;
@@ -224,7 +224,7 @@ const getNextRaceDate = () => {
           const y = now.getFullYear();
           const m = String(now.getMonth() + 1).padStart(2, '0');
           const d = String(now.getDate()).padStart(2, '0');
-          return `${y}-${m}-${d}`;
+          return ;
         };
         const selectedDate = ref(getNextRaceDate());
         const races = ref([]);
